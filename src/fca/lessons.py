@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -71,16 +72,24 @@ class LessonsLog:
     def _records(self) -> Iterator[LessonRecord]:
         if not self.path.exists():
             return
-        with self.path.open("r", encoding="utf-8") as fh:
+        with self.path.open("rb") as fh:
             fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
             try:
-                for line in fh:
+                while True:
+                    offset = fh.tell()
+                    line = fh.readline()
+                    if not line:
+                        break
                     raw = line.strip()
                     if not raw:
                         continue
                     try:
-                        row = json.loads(raw)
-                    except json.JSONDecodeError:
+                        row = json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        print(
+                            f"WARNING lessons_wal_torn_record torn_record_at_offset={offset}",
+                            file=sys.stderr,
+                        )
                         continue
                     try:
                         yield LessonRecord(
