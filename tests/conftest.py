@@ -58,3 +58,21 @@ def falkordb_test(request) -> Iterator["FalkorCogneeAdapter"]:
             FalkorDB(host="127.0.0.1", port=6380).select_graph(graph_name).delete()
         except Exception:
             pass
+
+
+@pytest.fixture
+def db(request) -> Iterator[FalkorDB]:
+    """Yield a raw FalkorDB client bound to the docker test instance."""
+    try:
+        client = FalkorDB(host="127.0.0.1", port=6380, socket_timeout=1, socket_connect_timeout=1)
+        client.list_graphs()
+    except Exception as exc:  # pragma: no cover - depends on local docker state
+        message = (
+            "FalkorDB :6380 not reachable; start with "
+            "`docker compose -f docker-compose.test.yml up -d` "
+            f"({exc!r})"
+        )
+        if request.config.getoption("--require-fixtures"):
+            pytest.fail(f"FalkorDB :6380 not reachable; required by --require-fixtures. {exc!r}")
+        pytest.skip(message)
+    yield client
