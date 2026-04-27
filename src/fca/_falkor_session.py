@@ -105,6 +105,12 @@ class FalkorSession:
         except Exception as exc:  # noqa: BLE001
             raise self.translate(exc) from exc
 
+    def drop_node_vector_index(self, label: str, property_name: str):
+        try:
+            return self.graph.drop_node_vector_index(label, property_name)
+        except Exception as exc:  # noqa: BLE001
+            raise self.translate(exc) from exc
+
     @staticmethod
     def translate(exc: Exception) -> FalkorAdapterError:
         if isinstance(exc, FalkorAdapterError):

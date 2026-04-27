@@ -127,7 +127,7 @@ def get_neighbors(node_id: str) -> Cypher:
 def get_edges(node_id: str) -> Cypher:
     return (
         "MATCH (n)-[r]-(m) WHERE n.id = $node_id "
-        "RETURN n.id, m.id, type(r), properties(r)",
+        "RETURN startNode(r).id, endNode(r).id, type(r), properties(r)",
         {"node_id": str(node_id)},
     )
 
@@ -159,7 +159,7 @@ def graph_edges() -> Cypher:
 
 
 def graph_counts() -> Cypher:
-    return "MATCH (n) WITH count(n) AS nodes MATCH ()-[r]->() RETURN nodes, count(r)", {}
+    return "MATCH (n) WITH count(n) AS nodes OPTIONAL MATCH ()-[r]->() RETURN nodes, count(r)", {}
 
 
 def is_empty() -> Cypher:

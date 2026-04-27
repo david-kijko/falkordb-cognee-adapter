@@ -7,6 +7,7 @@ from typing import Any
 
 from falkordb import FalkorDB
 
+from fca._falkor_session import FalkorSession
 from fca.adapter import FalkorCogneeAdapter
 from fca.isolation import DatasetIsolationStrategy, GraphPerDataset
 from fca.roles import Role
@@ -53,13 +54,30 @@ class DatasetRouter:
 
     async def delete_dataset(self, dataset: str) -> None:
         # TODO(slice-2): wire role guard
-        self._emit("delete_dataset", dataset=dataset)
         start = time.perf_counter()
-        self._iso.delete(self._db, dataset)
-        self._cache.pop(dataset, None)
+        try:
+            self._iso.delete(self._db, dataset)
+            self._cache.pop(dataset, None)
+        except Exception as exc:  # noqa: BLE001 - route driver failures through typed telemetry
+            typed = FalkorSession.translate(exc)
+            self._emit(
+                "delete_dataset",
+                dataset=dataset,
+                latency_ms=(time.perf_counter() - start) * 1000,
+                failure_class=typed.failure_class,
+            )
+            raise typed from exc
         self._emit("delete_dataset", dataset=dataset, latency_ms=(time.perf_counter() - start) * 1000, rows_out=0)
 
-    def _emit(self, op: str, *, dataset: str, latency_ms: float | None = None, rows_out: int | None = None) -> None:
+    def _emit(
+        self,
+        op: str,
+        *,
+        dataset: str,
+        latency_ms: float | None = None,
+        rows_out: int | None = None,
+        failure_class: str | None = None,
+    ) -> None:
         event: dict[str, Any] = {
             "op": op,
             "dataset": dataset,
@@ -68,7 +86,7 @@ class DatasetRouter:
             "rows_in": 1,
             "rows_out": rows_out,
             "retries": 0,
-            "failure_class": None,
+            "failure_class": failure_class,
             "schema_version": "1",
             "ts": time.time(),
         }

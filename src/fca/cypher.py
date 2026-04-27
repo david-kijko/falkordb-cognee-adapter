@@ -12,7 +12,7 @@ import re
 from fca.exceptions import FalkorSchemaError
 
 LABEL_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
-RELTYPE_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+RELTYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PROPERTY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -26,11 +26,16 @@ def safe_label(label: str) -> str:
     return label
 
 
-def safe_reltype(rel: str) -> str:
-    """Return rel if it matches RELTYPE_RE; else raise FalkorSchemaError."""
+def normalize_reltype(rel: str) -> str:
+    """Normalize Cognee relationship identifiers to safe Cypher relationship types."""
     if not isinstance(rel, str) or RELTYPE_RE.fullmatch(rel) is None:
         raise FalkorSchemaError(f"Unsafe Cypher relationship type: {rel!r}")
-    return rel
+    return rel.upper()
+
+
+def safe_reltype(rel: str) -> str:
+    """Return a normalized Cypher relationship type for a safe identifier."""
+    return normalize_reltype(rel)
 
 
 def safe_property_name(prop: str) -> str:

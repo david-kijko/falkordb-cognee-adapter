@@ -29,6 +29,10 @@ class FalkorTimeoutError(FalkorAdapterError):
     failure_class: ClassVar[str] = "timeout"
 
 
+class FalkorEmbeddingError(FalkorAdapterError):
+    failure_class: ClassVar[str] = "embedding"
+
+
 class CogneeContractError(FalkorAdapterError):
     """Raised by upgrade contract test if installed Cognee drifts from frozen fixture."""
 
