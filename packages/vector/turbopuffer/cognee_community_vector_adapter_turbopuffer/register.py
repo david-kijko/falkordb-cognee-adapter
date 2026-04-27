@@ -1,8 +1,0 @@
-from cognee.infrastructure.databases.dataset_database_handler import use_dataset_database_handler
-from cognee.infrastructure.databases.vector import use_vector_adapter
-
-from .turbopuffer_adapter import TurbopufferAdapter
-from .TurbopufferDatasetDatabaseHandler import TurbopufferDatasetDatabaseHandler
-
-use_vector_adapter("turbopuffer", TurbopufferAdapter)
-use_dataset_database_handler("turbopuffer", TurbopufferDatasetDatabaseHandler, "turbopuffer")

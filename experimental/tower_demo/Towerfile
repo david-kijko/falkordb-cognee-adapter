@@ -1,7 +1,0 @@
-[app]
-name = "hn_cognee_tower_v1"
-script = "task.py"
-source = [
-    "./*.py",
-    "./requirements.txt",
-]

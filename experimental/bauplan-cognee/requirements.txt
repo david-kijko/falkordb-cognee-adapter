@@ -1,2 +1,0 @@
-bauplan
-cognee[aws]==0.3.7.dev2

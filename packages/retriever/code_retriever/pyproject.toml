@@ -1,9 +1,0 @@
-[project]
-name = "cognee-community-retriever-code"
-version = "0.1.5"
-description = "Package containing a custom cognee retriever for working with code repositories"
-requires-python = ">=3.11,<3.14"
-dependencies = [
-    "cognee==0.5.6",
-    "aenum>=3.1.16"
-]

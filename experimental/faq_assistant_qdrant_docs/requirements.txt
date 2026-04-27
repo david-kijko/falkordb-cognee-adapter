@@ -1,1 +1,0 @@
-cognee[neo4j,postgres]>=0.1.40
