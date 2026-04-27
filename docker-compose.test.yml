@@ -1,0 +1,8 @@
+services:
+  falkordb:
+    image: falkordb/falkordb-server@sha256:5c6aa2c697f7e1539fda63cf636bea6e739765ed6b0b56c8b40a93c4965f9f4f
+    ports:
+      - "127.0.0.1:6380:6379"
+    tmpfs:
+      - /data
+    volumes: []

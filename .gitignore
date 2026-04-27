@@ -1,16 +1,30 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+*.pyc
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
 
 # Virtual environments
-.venv
-.idea
+.venv/
+.idea/
+
 # Env config
 .env
+
+# Local FalkorDB data
+/data/
+data/
+
+# Generated Cognee contract fixture; regenerate with make freeze-cognee-contract.
+tests/fixtures/cognee_1_0_3_contract.json
+
+# Test/tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Cognee system
 # for backward compatibility

@@ -1,0 +1,18 @@
+services:
+  falkordb:
+    # image_digest: falkordb/falkordb-server@sha256:5c6aa2c697f7e1539fda63cf636bea6e739765ed6b0b56c8b40a93c4965f9f4f
+    # Resolved via Docker registry API after local docker daemon access was denied.
+    # Orchestrator verification command:
+    #   docker pull falkordb/falkordb-server:latest && docker inspect --format '{{index .RepoDigests 0}}' falkordb/falkordb-server:latest
+    image: falkordb/falkordb-server@sha256:5c6aa2c697f7e1539fda63cf636bea6e739765ed6b0b56c8b40a93c4965f9f4f
+    restart: unless-stopped
+    command: >
+      --requirepass ${FALKOR_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --save 3600 1
+      --bind 0.0.0.0
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./data/falkordb:/data
