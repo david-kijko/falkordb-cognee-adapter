@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import inspect
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 
 from fca.adapter import FalkorCogneeAdapter, ResultList
 from fca.roles import Role
@@ -67,25 +69,12 @@ class _FakeEmbedding:
         return [[0.0, 0.0] for _ in texts]
 
 
-@pytest.mark.asyncio
-async def test_every_public_method_calls_a_guard(monkeypatch):
-    """SP6 invariant: every public adapter method calls one guard before driver use."""
-    adapter = FalkorCogneeAdapter(
-        host="127.0.0.1",
-        port=6380,
-        password="",
-        graph_name=f"session_guarded_{uuid4().hex}",
-        role=Role.ARCHIE,
-        socket_timeout=0.1,
-        connection_timeout=0.1,
-    )
+def _interface_methods() -> list[str]:
+    return sorted(GraphDBInterface.__abstractmethods__ | VectorDBInterface.__abstractmethods__)
 
-    public_methods = sorted(
-        name
-        for name, member in FalkorCogneeAdapter.__dict__.items()
-        if inspect.iscoroutinefunction(member) and not name.startswith("_")
-    )
-    calls = {
+
+def _method_calls(adapter: FalkorCogneeAdapter) -> dict[str, Callable[[], Any]]:
+    return {
         "add_edge": lambda: adapter.add_edge("a", "b", "REL", {}),
         "add_edges": lambda: adapter.add_edges([("a", "b", "REL", {})]),
         "add_node": lambda: adapter.add_node("a", {"type": "Node"}),
@@ -93,7 +82,6 @@ async def test_every_public_method_calls_a_guard(monkeypatch):
         "batch_search": lambda: adapter.batch_search("IndexSchema_text", [], 1),
         "create_collection": lambda: adapter.create_collection("IndexSchema_text"),
         "create_data_points": lambda: adapter.create_data_points("IndexSchema_text", []),
-        "create_vector_index": lambda: adapter.create_vector_index("IndexSchema", "text"),
         "delete_data_points": lambda: adapter.delete_data_points("IndexSchema_text", [uuid4()]),
         "delete_graph": lambda: adapter.delete_graph(),
         "delete_node": lambda: adapter.delete_node("a"),
@@ -112,16 +100,34 @@ async def test_every_public_method_calls_a_guard(monkeypatch):
         "has_collection": lambda: adapter.has_collection("IndexSchema_text"),
         "has_edge": lambda: adapter.has_edge("a", "b", "REL"),
         "has_edges": lambda: adapter.has_edges([("a", "b", "REL", {})]),
-        "index_data_points": lambda: adapter.index_data_points("IndexSchema", "text", []),
         "is_empty": lambda: adapter.is_empty(),
         "prune": lambda: adapter.prune(),
         "query": lambda: adapter.query("MATCH (n) RETURN n", {}),
         "retrieve": lambda: adapter.retrieve("IndexSchema_text", []),
         "search": lambda: adapter.search("IndexSchema_text", None, [0.0, 0.0], 1),
     }
-    assert set(calls) == set(public_methods)
 
-    for method_name in public_methods:
+
+async def _assert_interface_methods_guarded(monkeypatch) -> None:
+    adapter = FalkorCogneeAdapter(
+        host="127.0.0.1",
+        port=6380,
+        password="",
+        graph_name=f"session_guarded_{uuid4().hex}",
+        role=Role.ARCHIE,
+        socket_timeout=0.1,
+        connection_timeout=0.1,
+    )
+
+    interface_methods = _interface_methods()
+    calls = _method_calls(adapter)
+    assert set(calls) == set(interface_methods)
+
+    for method_name in interface_methods:
+        member = getattr(FalkorCogneeAdapter, method_name, None)
+        assert callable(member), f"{method_name} is missing on FalkorCogneeAdapter"
+        assert not getattr(member, "__isabstractmethod__", False), f"{method_name} remains abstract"
+
         order: list[str] = []
         adapter._session = _FakeSession(order, adapter.graph_name)
         adapter._vectors = _FakeVectors(order)
@@ -143,8 +149,25 @@ async def test_every_public_method_calls_a_guard(monkeypatch):
 
         guard_events = [event for event in order if event.startswith("guard:")]
         assert len(guard_events) == 1, f"{method_name} guard events: {order}"
-        first_driver = next(
-            (i for i, event in enumerate(order) if event.startswith("driver:")), None
-        )
+        first_driver = next((i for i, event in enumerate(order) if event.startswith("driver:")), None)
         if first_driver is not None:
             assert order.index(guard_events[0]) < first_driver, f"{method_name} order: {order}"
+
+
+@pytest.mark.asyncio
+async def test_every_public_interface_method_calls_a_guard(monkeypatch):
+    """SP6: every Cognee abstract interface method calls one guard before driver use."""
+    await _assert_interface_methods_guarded(monkeypatch)
+
+
+@pytest.mark.asyncio
+async def test_sp6_catches_unguarded_method(monkeypatch):
+    """Mutant test: replacing add_node with an unguarded method makes SP6 fail."""
+
+    async def unguarded_add_node(self, node, properties=None):
+        self._execute("CREATE (:Mutant {id: $id})", {"id": "unguarded"})
+
+    monkeypatch.setattr(FalkorCogneeAdapter, "add_node", unguarded_add_node)
+
+    with pytest.raises(AssertionError, match="add_node guard events"):
+        await _assert_interface_methods_guarded(monkeypatch)

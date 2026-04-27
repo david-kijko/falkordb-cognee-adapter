@@ -1,10 +1,9 @@
-"""Regex-only Cypher read safety guard.
+"""v0.1 conservative regex policy for Cypher read safety.
 
-This v0.1 guard is intentionally conservative and is not a Cypher parser. It
-masks simple quoted string literals, then rejects read-mode queries containing
-write tokens or FalkorDB index-create procedure calls. Comments are not parsed
-as executable/non-executable regions, so write tokens in comments may be
-rejected. That false-positive bias is deliberate for read-mode safety.
+False positives are acceptable; false negatives are not. This is not a Cypher
+parser: read-mode queries are rejected when regexes find write tokens or
+FalkorDB index-create procedure calls in any context, including string literals,
+comments, and identifiers. Slice 7 considers a proper Cypher parser.
 """
 
 from __future__ import annotations
@@ -15,8 +14,8 @@ from enum import Enum
 from fca.exceptions import QueryGuardError
 
 WRITE_TOKENS = re.compile(r"\b(CREATE|MERGE|SET|DELETE|DROP|REMOVE)\b", re.IGNORECASE)
+WRITE_TOKEN_PREFIXES = re.compile(r"\b(Create|Merge|Set|Delete|Drop|Remove)")
 INDEX_CREATE = re.compile(r"\bCALL\s+db\.idx\.[a-z_]+\.create", re.IGNORECASE)
-STRING_LITERAL = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"")
 
 
 class QueryMode(str, Enum):
@@ -24,18 +23,11 @@ class QueryMode(str, Enum):
     WRITE = "write"
 
 
-def _mask_string_literals(cypher: str) -> str:
-    return STRING_LITERAL.sub(lambda match: " " * (match.end() - match.start()), cypher)
-
-
 def assert_read_safe(cypher: str) -> None:
-    """Raise QueryGuardError if read-mode Cypher appears to write.
+    """Raise QueryGuardError if read-mode Cypher regex-matches write syntax.
 
-    Approximation: v0.1 uses regexes after masking simple string literals, not a
-    full Cypher parser. Anything outside a quoted literal matching write tokens
-    or db.idx.*.create is rejected, including conservative comment false
-    positives.
+    v0.1 intentionally does not parse Cypher context. Any matching write token,
+    including in strings, comments, or identifiers, is rejected.
     """
-    masked = _mask_string_literals(cypher)
-    if INDEX_CREATE.search(masked) or WRITE_TOKENS.search(masked):
+    if INDEX_CREATE.search(cypher) or WRITE_TOKENS.search(cypher) or WRITE_TOKEN_PREFIXES.search(cypher):
         raise QueryGuardError("Read-mode query contains write or index-create token")

@@ -1,4 +1,12 @@
-"""Role matrices for Archie dataset-level authority checks."""
+"""Role matrices for Archie dataset-level authority checks.
+
+Dynamic ``session_*`` and ``investigation_*`` reads are a v0.1 approximation:
+the adapter receives only a role and dataset, not a caller principal or ownership
+record, so dynamic datasets are READ-by-any-role and WRITE-only-by-archie.
+
+# v0.2: add caller principal context plus an ownership table, then narrow
+# dynamic reads to datasets owned by that principal.
+"""
 
 from __future__ import annotations
 

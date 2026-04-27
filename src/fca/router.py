@@ -53,12 +53,12 @@ class DatasetRouter:
         return self._cache[dataset]
 
     async def delete_dataset(self, dataset: str) -> None:
-        self.for_dataset(dataset)._write_guard(dataset)
         start = time.perf_counter()
         try:
+            self.for_dataset(dataset)._write_guard(dataset)
             self._iso.delete(self._db, dataset)
             self._cache.pop(dataset, None)
-        except Exception as exc:  # noqa: BLE001 - route driver failures through typed telemetry
+        except Exception as exc:  # noqa: BLE001 - route driver and guard failures through telemetry
             typed = FalkorSession.translate(exc)
             self._emit(
                 "delete_dataset",

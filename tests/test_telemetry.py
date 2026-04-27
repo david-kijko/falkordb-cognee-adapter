@@ -89,3 +89,31 @@ async def test_telemetry_failure_path_emits_failure_class():
     assert len(sink.events) == 1
     assert sink.events[0]["op"] == "query"
     assert sink.events[0]["failure_class"] is not None
+
+
+@pytest.mark.asyncio
+async def test_router_delete_unauthorized_emits_telemetry(monkeypatch):
+    from fca.exceptions import WriteAuthorityError
+    from fca.router import DatasetRouter
+
+    class FakeFalkorDB:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("fca.router.FalkorDB", FakeFalkorDB)
+
+    sink = CaptureSink()
+    router = DatasetRouter(
+        host="127.0.0.1",
+        port=6380,
+        password="",
+        role=Role.ARCHIE,
+        telemetry=sink,
+    )
+
+    with pytest.raises(WriteAuthorityError):
+        await router.delete_dataset("canon")
+
+    assert len(sink.events) == 1
+    assert sink.events[0]["op"] == "delete_dataset"
+    assert sink.events[0]["failure_class"] == "write_authority"

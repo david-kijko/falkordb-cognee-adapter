@@ -40,6 +40,31 @@ def test_assert_read_safe_accepts_read_only(cypher):
     assert assert_read_safe(cypher) is None
 
 
+@pytest.mark.parametrize(
+    ("cypher", "expect_rejected"),
+    [
+        ("RETURN 'CREATE'", True),
+        ("// CREATE foo", True),
+        ("/* CREATE bar */", True),
+        ("MATCH (CreateUser) RETURN n", True),
+        ("MATCH (n) RETURN n.create_date", False),
+    ],
+)
+def test_query_guard_documented_policy(cypher, expect_rejected):
+    """v0.1 is conservative: reject regex write tokens regardless of context.
+
+    Slice 7 may upgrade this to a real Cypher parser.
+    """
+    from fca.exceptions import QueryGuardError
+    from fca.query_guard import assert_read_safe
+
+    if expect_rejected:
+        with pytest.raises(QueryGuardError):
+            assert_read_safe(cypher)
+    else:
+        assert assert_read_safe(cypher) is None
+
+
 @pytest.mark.asyncio
 async def test_query_in_read_mode_raises_on_write_cypher(falkordb_test):
     """End-to-end: adapter.query("CREATE ...") raises QueryGuardError before driver."""

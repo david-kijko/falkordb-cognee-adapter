@@ -13,18 +13,30 @@ if TYPE_CHECKING:
     from fca.adapter import FalkorCogneeAdapter
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--require-fixtures",
+        action="store_true",
+        default=False,
+        help="Fail (instead of skip) when external fixtures unavailable.",
+    )
+
+
 @pytest.fixture
-def falkordb_test() -> Iterator["FalkorCogneeAdapter"]:
+def falkordb_test(request) -> Iterator["FalkorCogneeAdapter"]:
     """Yield an adapter bound to a fresh graph on the docker FalkorDB test instance."""
     try:
         db = FalkorDB(host="127.0.0.1", port=6380, socket_timeout=1, socket_connect_timeout=1)
         db.list_graphs()
     except Exception as exc:  # pragma: no cover - depends on local docker state
-        pytest.skip(
-            "FalkorDB test instance is not running on 127.0.0.1:6380; "
-            "start it with `docker compose -f docker-compose.test.yml up -d` "
+        message = (
+            "FalkorDB :6380 not reachable; start with "
+            "`docker compose -f docker-compose.test.yml up -d` "
             f"({exc!r})"
         )
+        if request.config.getoption("--require-fixtures"):
+            pytest.fail(f"FalkorDB :6380 not reachable; required by --require-fixtures. {exc!r}")
+        pytest.skip(message)
 
     from fca.adapter import FalkorCogneeAdapter
     from fca.roles import Role

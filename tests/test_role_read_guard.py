@@ -54,3 +54,12 @@ async def test_ingestor_cannot_read_lessons_via_adapter(falkordb_test):
 
     with pytest.raises(ReadAuthorityError):
         await adapter.get_graph_metrics()
+
+
+def test_dynamic_read_policy_documented():
+    """Dynamic read widening is intentional until ownership exists."""
+    import fca.roles as roles
+
+    assert roles.__doc__ is not None
+    assert "v0.1 approximation" in roles.__doc__
+    assert "v0.2" in roles.__doc__
