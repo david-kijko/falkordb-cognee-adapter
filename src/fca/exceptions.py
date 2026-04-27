@@ -37,3 +37,15 @@ class CogneeContractError(FalkorAdapterError):
     """Raised by upgrade contract test if installed Cognee drifts from frozen fixture."""
 
     failure_class: ClassVar[str] = "cognee_contract_drift"
+
+
+class ReadAuthorityError(FalkorAdapterError):
+    failure_class: ClassVar[str] = "read_authority"
+
+
+class WriteAuthorityError(FalkorAdapterError):
+    failure_class: ClassVar[str] = "write_authority"
+
+
+class QueryGuardError(FalkorAdapterError):
+    failure_class: ClassVar[str] = "query_guard"

@@ -11,6 +11,7 @@ from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBI
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 from fca import _cypher_builders as cy
+from fca._authority import assert_can_read, assert_can_write, guarded_op
 from fca._falkor_session import FalkorSession
 from fca._vector_index import (
     VectorIndexManager,
@@ -25,19 +26,13 @@ from fca._vector_index import (
 from fca.embeddings import OllamaEmbeddingEngine
 from fca.exceptions import FalkorEmbeddingError, FalkorQueryError
 from fca.isolation import DatasetIsolationStrategy, GraphPerDataset
+from fca.query_guard import assert_read_safe
+from fca._result import ResultList
 from fca.roles import Role
 from fca.telemetry import NullSink, TelemetrySink
 
-class ResultList(list):
-    """Plain list with a ``result_set`` alias for Cognee/upstream compatibility."""
-
-    @property
-    def result_set(self):
-        return self
-
 def telemetry_op(func):
     """Emit exactly one telemetry event per public adapter method call."""
-
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
         start = time.perf_counter()
@@ -54,9 +49,9 @@ def telemetry_op(func):
             raise
         self._emit(func.__name__, latency_ms=(time.perf_counter() - start) * 1000, rows_out=self._rows_out(result))
         return result
-
     return wrapper
-
+read_op = guarded_op(telemetry_op, "_read_guard")
+write_op = guarded_op(telemetry_op, "_write_guard")
 class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
     """
     Cognee 1.0.3 hybrid adapter for FalkorDB. Bound to ONE graph_name.
@@ -118,6 +113,12 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
     def _emit(self, op: str, **fields: Any) -> None:
         self.telemetry.emit(self._event(op, **fields))
 
+    def _read_guard(self, dataset: str) -> None:
+        assert_can_read(self.role, dataset)
+
+    def _write_guard(self, dataset: str) -> None:
+        assert_can_write(self.role, dataset)
+
     def _execute(
         self,
         statement: str,
@@ -128,25 +129,30 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         raw = self._session.execute(statement, params or {}, read_only=read_only)
         return ResultList(raw.result_set or [])
 
-    @telemetry_op
+    @read_op
     async def query(self, query: str, params: dict) -> List[Any]:
+        assert_read_safe(query)
+        return self._execute(query, params or {}, read_only=True)
+
+    async def _query_write(self, query: str, params: dict | None = None) -> List[Any]:
+        self._write_guard(self.graph_name)
         return self._execute(query, params or {})
 
-    @telemetry_op
+    @read_op
     async def is_empty(self) -> bool:
         if self.graph_name not in self._session.list_graphs():
             return True
         rows = self._execute(*cy.is_empty(), read_only=True)
         return bool(rows[0][0]) if rows else True
 
-    @telemetry_op
+    @write_op
     async def add_node(
         self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
     ) -> None:
         node_id, props = self._node_payload(node, properties)
         self._execute(*cy.add_node(node_id, props))
 
-    @telemetry_op
+    @write_op
     async def add_nodes(
         self, nodes: Union[List[Tuple[str, Dict[str, Any]]], List[DataPoint]]
     ) -> None:
@@ -154,25 +160,25 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         for statement, params in cy.grouped_add_nodes(normalized):
             self._execute(statement, params)
 
-    @telemetry_op
+    @write_op
     async def delete_node(self, node_id: str) -> None:
         self._execute(*cy.delete_node(node_id))
 
-    @telemetry_op
+    @write_op
     async def delete_nodes(self, node_ids: List[str]) -> None:
         self._execute(*cy.delete_nodes(node_ids))
 
-    @telemetry_op
+    @read_op
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         rows = self._execute(*cy.get_node(node_id), read_only=True)
         return self._props(rows[0][0]) if rows else None
 
-    @telemetry_op
+    @read_op
     async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
         rows = self._execute(*cy.get_nodes(node_ids), read_only=True)
         return [self._props(row[0]) for row in rows]
 
-    @telemetry_op
+    @write_op
     async def add_edge(
         self,
         source_id: str,
@@ -183,7 +189,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         for statement, params in cy.add_edges([(source_id, target_id, relationship_name, properties or {})]):
             self._execute(statement, params)
 
-    @telemetry_op
+    @write_op
     async def add_edges(
         self,
         edges: Union[
@@ -194,11 +200,11 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         for statement, params in cy.add_edges(edges):
             self._execute(statement, params)
 
-    @telemetry_op
+    @write_op
     async def delete_graph(self) -> None:
         self._session.delete_graph()
 
-    @telemetry_op
+    @read_op
     async def get_graph_data(
         self,
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
@@ -206,7 +212,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         edge_rows = self._execute(*cy.graph_edges(), read_only=True)
         return ([self._node_tuple(row[0]) for row in node_rows], [self._edge_tuple(row) for row in edge_rows])
 
-    @telemetry_op
+    @read_op
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         rows = self._execute(*cy.graph_counts(), read_only=True)
         metrics = {"num_nodes": 0, "num_edges": 0}
@@ -217,12 +223,12 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
             metrics["labels"] = sorted({label for row in label_rows for label in row[0]})
         return metrics
 
-    @telemetry_op
+    @read_op
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         rows = self._execute(*cy.has_edge(source_id, target_id, relationship_name), read_only=True)
         return bool(rows[0][0]) if rows else False
 
-    @telemetry_op
+    @read_op
     async def has_edges(
         self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
     ) -> List[Tuple[str, str, str, Dict[str, Any]]]:
@@ -233,31 +239,31 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
                 present.append(edge)
         return present
 
-    @telemetry_op
+    @read_op
     async def get_edges(self, node_id: str) -> List[Tuple[str, str, str, Dict[str, Any]]]:
         rows = self._execute(*cy.get_edges(node_id), read_only=True)
         return [self._edge_tuple(row) for row in rows]
 
-    @telemetry_op
+    @read_op
     async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
         rows = self._execute(*cy.get_neighbors(node_id), read_only=True)
         return [self._props(row[0]) for row in rows]
 
-    @telemetry_op
+    @read_op
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         rows = self._execute(*cy.nodeset_nodes(node_type, node_name, node_name_filter_operator), read_only=True)
         return ([(row[0], row[1]) for row in rows], [])
 
-    @telemetry_op
+    @read_op
     async def get_connections(
         self, node_id: Union[str, UUID]
     ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
         rows = self._execute(*cy.get_connections(str(node_id)), read_only=True)
         return [(self._props(row[0]), self._props(row[1]), self._props(row[2])) for row in rows]
 
-    @telemetry_op
+    @read_op
     async def get_neighborhood(
         self, node_ids: List[str], depth: int = 1, edge_types: Optional[List[str]] = None
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
@@ -266,7 +272,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         edge_rows = self._execute(*cy.subgraph_edges([node_id for node_id, _ in nodes]), read_only=True)
         return nodes, [self._edge_tuple(row) for row in edge_rows]
 
-    @telemetry_op
+    @read_op
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
@@ -275,16 +281,16 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         edge_rows = self._execute(*cy.subgraph_edges([node_id for node_id, _ in nodes]), read_only=True)
         return nodes, [self._edge_tuple(row) for row in edge_rows]
 
-    @telemetry_op
+    @read_op
     async def has_collection(self, collection_name: str) -> bool:
         return self._vectors.has_collection(collection_name)
 
-    @telemetry_op
+    @write_op
     async def create_collection(self, collection_name: str, payload_schema: Optional[Any] = None):
         self._vectors.ensure_index(collection_name)
         self._execute("MERGE (c:FCA_COLLECTION {name: $name}) SET c.updated_at = timestamp()", {"name": collection_name})
 
-    @telemetry_op
+    @write_op
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         if not data_points:
             return None
@@ -309,7 +315,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         self._execute(*upsert_vectors(collection_name, items))
         return None
 
-    @telemetry_op
+    @read_op
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         rows = self._execute(*retrieve_vectors(collection_name, data_point_ids), read_only=True)
         collection = collection_parts(collection_name)
@@ -318,7 +324,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
             for row in rows
         ]
 
-    @telemetry_op
+    @read_op
     async def search(
         self,
         collection_name: str,
@@ -349,7 +355,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
             results.append(ScoredResult(id=self._uuid(props.get("id")), score=float(row[1]), payload=payload))
         return results[: limit or len(results)]
 
-    @telemetry_op
+    @read_op
     async def batch_search(
         self,
         collection_name: str,
@@ -365,26 +371,26 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
             for vector in vectors
         ]
 
-    @telemetry_op
+    @write_op
     async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
         self._execute(*delete_vectors(collection_name, [str(point_id) for point_id in data_point_ids]))
 
-    @telemetry_op
+    @write_op
     async def prune(self):
         dropped = self._vectors.drop_all_vector_indexes()
         for label, vector_property in dropped:
             self._execute(*clear_vector_property(label, vector_property))
         self._execute("MATCH (c:FCA_COLLECTION) DETACH DELETE c", {})
 
-    @telemetry_op
+    @read_op
     async def embed_data(self, data: List[str]) -> List[List[float]]:
         return await self.embedding_engine.embed_text(data)
 
-    @telemetry_op
+    @write_op
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self._create_collection(f"{index_name}_{index_property_name}")
 
-    @telemetry_op
+    @write_op
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: List[DataPoint]
     ):

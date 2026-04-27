@@ -26,7 +26,7 @@ async def test_connection_error_surfaces_as_typed_exception(monkeypatch):
             raise ConnectionRefusedError("boom")
 
     monkeypatch.setattr(session_mod, "FalkorDB", BrokenFalkorDB)
-    adapter = FalkorCogneeAdapter("127.0.0.1", 6399, "", "broken", Role.ARCHIE)
+    adapter = FalkorCogneeAdapter("127.0.0.1", 6399, "", "session_broken", Role.ARCHIE)
 
     with pytest.raises(FalkorConnectionError):
         await adapter.add_node("n1", {"type": "TEST_NODE"})

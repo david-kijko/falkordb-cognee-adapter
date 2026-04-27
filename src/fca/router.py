@@ -53,7 +53,7 @@ class DatasetRouter:
         return self._cache[dataset]
 
     async def delete_dataset(self, dataset: str) -> None:
-        # TODO(slice-2): wire role guard
+        self.for_dataset(dataset)._write_guard(dataset)
         start = time.perf_counter()
         try:
             self._iso.delete(self._db, dataset)
@@ -67,7 +67,12 @@ class DatasetRouter:
                 failure_class=typed.failure_class,
             )
             raise typed from exc
-        self._emit("delete_dataset", dataset=dataset, latency_ms=(time.perf_counter() - start) * 1000, rows_out=0)
+        self._emit(
+            "delete_dataset",
+            dataset=dataset,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            rows_out=0,
+        )
 
     def _emit(
         self,

@@ -1,17 +1,42 @@
-"""Bare role enum for Slice 1.
-
-Slice 2 fills:
-- WRITE_MATRIX / READ_MATRIX
-- can_write / can_read helpers
-- adapter/router role guards
-"""
+"""Role matrices for Archie dataset-level authority checks."""
 
 from __future__ import annotations
 
 from enum import Enum
+
+from fca.datasets import is_archie_dynamic
 
 
 class Role(str, Enum):
     INGESTOR = "ingestor"
     VALIDATOR = "validator"
     ARCHIE = "archie"
+
+
+WRITE_MATRIX: dict[Role, frozenset[str]] = {
+    Role.INGESTOR: frozenset({"canon", "exemplars", "ingestion_metadata"}),
+    Role.VALIDATOR: frozenset({"lessons", "canon_errata"}),
+    Role.ARCHIE: frozenset({"quarantine"}),
+}
+
+READ_MATRIX: dict[Role, frozenset[str]] = {
+    Role.INGESTOR: frozenset({"canon", "exemplars", "ingestion_metadata"}),
+    Role.VALIDATOR: frozenset(
+        {"canon", "exemplars", "lessons", "canon_errata", "quarantine", "ingestion_metadata"}
+    ),
+    Role.ARCHIE: frozenset({"canon", "exemplars", "lessons", "canon_errata", "quarantine"}),
+}
+
+
+def can_write(role: Role, dataset: str) -> bool:
+    """True if role is permitted to write the dataset."""
+    return dataset in WRITE_MATRIX[role] or (role is Role.ARCHIE and is_archie_dynamic(dataset))
+
+
+def can_read(role: Role, dataset: str) -> bool:
+    """True if role is permitted to read the dataset.
+
+    Dynamic Archie datasets are treated as readable for all roles in v0.1 because
+    the adapter only receives a dataset name, not an ownership principal.
+    """
+    return dataset in READ_MATRIX[role] or is_archie_dynamic(dataset)

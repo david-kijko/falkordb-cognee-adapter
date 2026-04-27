@@ -29,7 +29,7 @@ def falkordb_test() -> Iterator["FalkorCogneeAdapter"]:
     from fca.adapter import FalkorCogneeAdapter
     from fca.roles import Role
 
-    graph_name = f"test_{uuid4().hex}"
+    graph_name = f"session_test_{uuid4().hex}"
     adapter = FalkorCogneeAdapter(
         host="127.0.0.1",
         port=6380,
