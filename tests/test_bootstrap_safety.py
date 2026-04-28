@@ -87,7 +87,7 @@ def test_dry_run_default_creates_nothing(db: FalkorDB) -> None:
     assert graph_names(db) == before
 
 
-def test_create_roster_creates_7_graphs(db: FalkorDB) -> None:
+def test_create_roster_creates_6_graphs_with_dataset_meta(db: FalkorDB) -> None:
     result = run_bootstrap("--create-roster")
 
     assert result.returncode == 0, result.stderr

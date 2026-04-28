@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap Archie dataset graphs and explicitly-scoped graph drops."""
+"""Bootstrap six fixed Archie dataset graphs with DatasetMeta markers."""
 
 from __future__ import annotations
 

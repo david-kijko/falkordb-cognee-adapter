@@ -7,13 +7,14 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+import zstandard
 
 from falkordb import FalkorDB
 
@@ -109,7 +110,9 @@ def _write_cypher(db: FalkorDB, graph_name: str, out: Path) -> tuple[int, int]:
 
 def _compress_zstd(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["zstd", "-q", "-f", str(source), "-o", str(target)], check=True)
+    compressor = zstandard.ZstdCompressor()
+    with source.open("rb") as src, target.open("wb") as dst:
+        compressor.copy_stream(src, dst)
 
 
 def _sha256(path: Path) -> str:
@@ -124,13 +127,89 @@ def _manifest_path(archive: Path) -> Path:
     return archive.with_suffix(archive.suffix + ".manifest.json")
 
 
+def _archive_timestamp(archive: Path) -> datetime:
+    manifest_path = _manifest_path(archive)
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            snapshot_at = str(manifest.get("snapshot_at", ""))
+            if snapshot_at:
+                return datetime.fromisoformat(snapshot_at.replace("Z", "+00:00"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+    try:
+        year, month, day = map(int, archive.parts[-4:-1])
+        hour_text = archive.name.split(".", 1)[0]
+        hour = int(hour_text) if hour_text.isdigit() else 0
+        return datetime(year, month, day, hour, tzinfo=timezone.utc)
+    except (IndexError, ValueError):
+        return datetime.fromtimestamp(archive.stat().st_mtime, tz=timezone.utc)
+
+
+def _select_retained_archives(archives: list[Path]) -> list[Path]:
+    if not archives:
+        return []
+    by_time = sorted(
+        ((archive, _archive_timestamp(archive)) for archive in archives),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    reference = by_time[0][1]
+    hourly_cutoff = reference - timedelta(hours=24)
+    daily_cutoff = reference - timedelta(days=32)
+    weekly_cutoff = daily_cutoff - timedelta(weeks=52)
+
+    retained: list[Path] = []
+    retained_set: set[Path] = set()
+
+    def keep(archive: Path) -> None:
+        if archive not in retained_set and len(retained) < RETAINED_ARCHIVES:
+            retained.append(archive)
+            retained_set.add(archive)
+
+    for archive, when in by_time:
+        if when > hourly_cutoff:
+            keep(archive)
+
+    daily_seen: set[tuple[int, int, int]] = set()
+    for archive, when in by_time:
+        if not (daily_cutoff < when <= hourly_cutoff):
+            continue
+        day = (when.year, when.month, when.day)
+        if day not in daily_seen:
+            keep(archive)
+            daily_seen.add(day)
+        if len(daily_seen) >= 30:
+            break
+
+    weekly_seen: set[tuple[int, int]] = set()
+    for archive, when in by_time:
+        if not (weekly_cutoff <= when <= daily_cutoff):
+            continue
+        iso = when.isocalendar()
+        week = (iso.year, iso.week)
+        if week not in weekly_seen:
+            keep(archive)
+            weekly_seen.add(week)
+        if len(weekly_seen) >= 52:
+            break
+
+    return retained
+
+
+def _delete_archive_pair(archive: Path) -> None:
+    old_manifest = _manifest_path(archive)
+    archive.unlink(missing_ok=True)
+    old_manifest.unlink(missing_ok=True)
+
+
 def _enforce_retention_and_budget(graph_root: Path, budget_bytes: int) -> bool:
-    archives = sorted(graph_root.glob("**/*.cypher.zst"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for old_archive in archives[RETAINED_ARCHIVES:]:
-        old_manifest = _manifest_path(old_archive)
-        old_archive.unlink(missing_ok=True)
-        old_manifest.unlink(missing_ok=True)
-    retained = archives[:RETAINED_ARCHIVES]
+    archives = list(graph_root.glob("**/*.cypher.zst"))
+    retained = _select_retained_archives(archives)
+    retained_set = set(retained)
+    for old_archive in archives:
+        if old_archive not in retained_set:
+            _delete_archive_pair(old_archive)
     projected = sum(path.stat().st_size for path in retained if path.exists())
     if projected > budget_bytes:
         print(
@@ -163,7 +242,10 @@ def export_graph(db: FalkorDB, graph_name: str, output_root: Path, budget_bytes:
     }
     _manifest_path(archive).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(f"exported {graph_name} nodes={node_count} edges={edge_count} archive={archive}")
-    return 0 if _enforce_retention_and_budget(output_root / graph_name, budget_bytes) else 4
+    if not _enforce_retention_and_budget(output_root / graph_name, budget_bytes):
+        _delete_archive_pair(archive)
+        return 4
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:

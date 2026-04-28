@@ -1,4 +1,4 @@
-"""Canonical dataset roster used by later role matrices."""
+"""Six fixed dataset graphs, each owned via a DatasetMeta marker."""
 
 from __future__ import annotations
 
