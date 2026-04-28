@@ -23,7 +23,7 @@ from fca._vector_index import (
     validate_vector_dimension,
     vector_query,
 )
-from fca.embeddings import OllamaEmbeddingEngine
+from fca.embeddings import embedding_engine_from_env
 from fca.exceptions import FalkorEmbeddingError, FalkorQueryError
 from fca.isolation import DatasetIsolationStrategy, GraphPerDataset
 from fca.query_guard import assert_read_safe
@@ -77,7 +77,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         self.role = role
         self.isolation = isolation or GraphPerDataset()
         self.telemetry = telemetry or NullSink()
-        self.embedding_engine = OllamaEmbeddingEngine()
+        self.embedding_engine = embedding_engine_from_env()
         self._session = FalkorSession(
             host=host,
             port=port,
@@ -297,7 +297,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         await self._create_collection(collection_name)
         collection = collection_parts(collection_name)
         texts = [str(getattr(point, collection.field_name)) for point in data_points]
-        vectors = await self.embedding_engine.embed_text(texts)
+        vectors = await self.embedding_engine.embed_documents(texts)
         expected = self._vectors.dimension(collection_name)
         items = []
         for point, vector in zip(data_points, vectors, strict=True):
@@ -335,13 +335,14 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
+        mode: str = "qa",
     ):
         if not self._vectors.has_collection(collection_name):
             raise FalkorEmbeddingError(f"Vector collection does not exist: {collection_name}")
         if query_vector is None:
             if query_text is None:
                 raise FalkorQueryError("search requires query_text or query_vector")
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+            query_vector = await self.embedding_engine.embed_query(query_text, mode=mode)
         expected = self._vectors.dimension(collection_name)
         query_vector = validate_vector_dimension(query_vector, expected)
         collection = collection_parts(collection_name)
@@ -365,7 +366,10 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
-        vectors = await self.embedding_engine.embed_text(query_texts) if query_texts else []
+        vectors = [
+            await self.embedding_engine.embed_query(query_text, mode="search")
+            for query_text in query_texts
+        ] if query_texts else []
         return [
             await self._search_no_telemetry(collection_name, vector, limit, include_payload=include_payload, node_name=node_name)
             for vector in vectors
@@ -384,7 +388,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
 
     @read_op
     async def embed_data(self, data: List[str]) -> List[List[float]]:
-        return await self.embedding_engine.embed_text(data)
+        return await self.embedding_engine.embed_documents(data)
 
     @write_op
     async def create_vector_index(self, index_name: str, index_property_name: str):
@@ -406,7 +410,7 @@ class FalkorCogneeAdapter(GraphDBInterface, VectorDBInterface):
         collection = collection_parts(collection_name)
         await self._create_collection(collection_name)
         texts = [str(getattr(point, collection.field_name)) for point in data_points]
-        vectors = await self.embedding_engine.embed_text(texts)
+        vectors = await self.embedding_engine.embed_documents(texts)
         expected = self._vectors.dimension(collection_name)
         items = []
         for point, vector in zip(data_points, vectors, strict=True):
