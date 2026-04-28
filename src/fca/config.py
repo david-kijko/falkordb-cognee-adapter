@@ -29,8 +29,8 @@ def _env(name: str, fallback: str) -> str:
 
 def embedding_config_from_env() -> EmbeddingConfig:
     provider = _env("EMBEDDING_PROVIDER", EmbeddingConfig.provider).lower()
-    default_model = "gemini-embedding-001" if provider == "vertex" else EmbeddingConfig.model
-    default_dimensions = "3072" if provider == "vertex" else str(EmbeddingConfig.dimensions)
+    default_model = "text-embedding-005" if provider == "vertex" else EmbeddingConfig.model
+    default_dimensions = "768" if provider == "vertex" else str(EmbeddingConfig.dimensions)
     return EmbeddingConfig(
         provider=provider,
         endpoint=_env("EMBEDDING_ENDPOINT", EmbeddingConfig.endpoint),

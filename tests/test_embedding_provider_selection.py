@@ -19,16 +19,20 @@ def test_defaults_keep_ollama_bge_m3(monkeypatch):
 
 def test_vertex_provider_selects_vertex_engine_and_task_defaults(monkeypatch):
     monkeypatch.setenv("FCA_EMBEDDING_PROVIDER", "vertex")
-    monkeypatch.setenv("FCA_EMBEDDING_MODEL", "gemini-embedding-001")
     monkeypatch.setenv("FCA_VERTEX_DOCUMENT_TASK", "RETRIEVAL_DOCUMENT")
     monkeypatch.setenv("FCA_VERTEX_QUERY_TASK", "QUESTION_ANSWERING")
     monkeypatch.setenv("FCA_VERTEX_VERIFY_TASK", "FACT_VERIFICATION")
+    monkeypatch.delenv("FCA_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("FCA_EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.delenv("EMBEDDING_DIMENSIONS", raising=False)
 
     config = embedding_config_from_env()
     engine = embedding_engine_from_env(config)
 
     assert config.provider == "vertex"
-    assert config.model == "gemini-embedding-001"
+    assert config.model == "text-embedding-005"
+    assert config.dimensions == 768
     assert config.vertex_document_task == "RETRIEVAL_DOCUMENT"
     assert config.vertex_query_task == "QUESTION_ANSWERING"
     assert config.vertex_verify_task == "FACT_VERIFICATION"
